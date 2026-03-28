@@ -42,7 +42,13 @@ let currentActiveView = 'schedule';
 dbRef.on('value', (snapshot) => {
     const data = snapshot.val();
     if (data) {
+        // Fix: Ensure arrays exist even if Firebase deleted them for being empty
         db = data;
+        if (!db.exams) db.exams = [];
+        if (!db.homework) db.homework = [];
+        if (!db.teachers) db.teachers = [];
+        if (!db.updates) db.updates = { schedule: 0, exams: 0, homework: 0, teachers: 0 };
+        
         if (currentUser) {
             app.render(currentActiveView);
             app.checkNotifications();
@@ -142,8 +148,13 @@ const app = {
         }
         else if (['exams', 'homework', 'teachers'].includes(view)) {
             const container = document.getElementById(`${view}-container`);
-            container.innerHTML = db[view].length ? '' : `<div class="empty-state" style="text-align:center; padding:50px; color:#666; font-style:italic">Everything is chill. Nothing here yet.</div>`;
-            db[view].forEach((item, index) => {
+            
+            // Fix: Fallback to empty array if data is missing
+            const items = db[view] || [];
+            
+            container.innerHTML = items.length ? '' : `<div class="empty-state" style="text-align:center; padding:50px; color:#666; font-style:italic">Everything is chill. Nothing here yet.</div>`;
+            
+            items.forEach((item, index) => {
                 const delIcon = isAdmin ? `<button class="delete-btn" onclick="app.delItem('${view}',${index})"><i class="fas fa-trash"></i></button>` : '';
                 container.innerHTML += `<div class="card glass ${item.status === 'Confirmed Exam' ? 'status-confirmed' : ''}">
                     ${delIcon}<h4>${item.subject || item.name}</h4><p>${item.lessons || item.description || ''}</p>
@@ -174,6 +185,7 @@ const app = {
         const s = prompt("Subject:"); if(!s) return;
         const l = prompt("Lessons:");
         const st = prompt("Status: 1 for Possible, 2 for Confirmed") == '2' ? "Confirmed Exam" : "Possible Exam";
+        if (!db.exams) db.exams = []; // Fix: Check existence
         db.exams.push({subject:s, lessons:l, status:st}); db.updates.exams = Date.now(); app.save();
     },
 
@@ -181,18 +193,21 @@ const app = {
         const s = prompt("Subject:"); if(!s) return;
         const d = prompt("Homework Details:");
         const dl = prompt("Deadline:");
+        if (!db.homework) db.homework = []; // Fix: Check existence
         db.homework.push({subject:s, description:d, deadline:dl}); db.updates.homework = Date.now(); app.save();
     },
 
     addAbsence: () => {
         const n = prompt("Teacher Name:"); if(!n) return;
         const d = prompt("Absent for how long?");
+        if (!db.teachers) db.teachers = []; // Fix: Check existence
         db.teachers.push({name:n, duration:d}); db.updates.teachers = Date.now(); app.save();
     },
 
     checkNotifications: () => {
         const last = localStorage.getItem('last_viewed') || 0;
         let show = false;
+        if (!db.updates) return; // Safety check
         ['schedule','exams','homework','teachers'].forEach(t => {
             if(db.updates[t] > last) { 
                 const dot = document.getElementById(`dot-${t}`);
@@ -212,4 +227,3 @@ const app = {
 };
 
 document.getElementById('auth-code').addEventListener('keypress', e => { if(e.key==='Enter') app.login(); });
-                                                                                
