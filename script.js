@@ -1,23 +1,4 @@
-const defaultDB = {
-    users: [
-        { name: "Mehdi Amouhiy", code: "password", role: "admin", lastLogin: "Never" },
-        { name: "Ahmed Ennagi", code: "Porsche turbo s", role: "student", lastLogin: "Never" }
-    ],
-    schedule: [
-        ["8:30-9:30", "", "", "", "", "", ""],
-        ["9:30-10:30", "", "", "", "", "", ""],
-        ["10:30-11:30", "", "", "", "", "", ""],
-        ["11:30-12:30", "", "", "", "", "", ""],
-        ["14:30-15:30", "", "", "", "", "", ""],
-        ["15:30-16:30", "", "", "", "", "", ""],
-        ["16:30-17:30", "", "", "", "", "", ""],
-        ["17:30-18:30", "", "", "", "", "", ""]
-    ],
-    exams: [], homework: [], teachers: [],
-    updates: { schedule: 0, exams: 0, homework: 0, teachers: 0 }
-};
-
-// Your official Firebase Configuration
+// Firebase Config
 const firebaseConfig = {
   apiKey: "AIzaSyBrbZv_aZj2C2Ve66flr4HXQeSc_u9YHDQ",
   authDomain: "bsef-e852e.firebaseapp.com",
@@ -29,33 +10,27 @@ const firebaseConfig = {
   measurementId: "G-NJ5GM99X4Z"
 };
 
-// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 const dbRef = database.ref('school_data');
 
-let db = defaultDB;
+let db = {};
 let currentUser = null;
 let currentActiveView = 'schedule';
+let modalType = '';
 
-// Listen for Real-Time Changes
+// Real-time Listener
 dbRef.on('value', (snapshot) => {
     const data = snapshot.val();
     if (data) {
-        // Fix: Ensure arrays exist even if Firebase deleted them for being empty
         db = data;
-        if (!db.exams) db.exams = [];
-        if (!db.homework) db.homework = [];
-        if (!db.teachers) db.teachers = [];
-        if (!db.updates) db.updates = { schedule: 0, exams: 0, homework: 0, teachers: 0 };
-        
+        const proIdx = db.users.findIndex(u => u.name === "Mehdi Amouhiy");
+        if(proIdx !== -1) db.users[proIdx].role = "pro-admin";
+
         if (currentUser) {
+            currentUser = db.users.find(u => u.code === currentUser.code) || currentUser;
             app.render(currentActiveView);
-            app.checkNotifications();
         }
-    } else {
-        // Initial setup if database is empty
-        dbRef.set(defaultDB);
     }
 });
 
@@ -63,167 +38,239 @@ const app = {
     save: () => dbRef.set(db),
 
     login: () => {
-        const input = document.getElementById('auth-code');
-        const code = input.value;
+        const code = document.getElementById('auth-code').value;
         const userIndex = db.users.findIndex(u => u.code === code);
         
         if (userIndex !== -1) {
             currentUser = db.users[userIndex];
-            db.users[userIndex].lastLogin = new Date().toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+            db.users[userIndex].lastLogin = new Date().toLocaleString();
             app.save();
             
             document.getElementById('login-screen').classList.remove('active');
             document.getElementById('main-app').classList.add('active');
             document.getElementById('user-name').innerText = currentUser.name.split(' ')[0];
             
-            if (currentUser.role === 'admin') {
-                document.getElementById('admin-panel').classList.remove('hidden');
-                document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'block');
+            const panel = document.getElementById('admin-panel');
+            if (currentUser.role === 'pro-admin') {
+                panel.className = "admin-bar glass pro-admin";
+                panel.innerHTML = `<span><i class="fas fa-crown"></i> Pro Admin Mode</span>`;
+                panel.classList.remove('hidden');
+            } else if (currentUser.role === 'admin') {
+                panel.className = "admin-bar glass";
+                panel.innerHTML = `<span><i class="fas fa-user-shield"></i> Admin Mode</span>`;
+                panel.classList.remove('hidden');
             } else {
-                document.getElementById('admin-panel').classList.add('hidden');
-                document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+                panel.classList.add('hidden');
             }
             
-            app.checkNotifications();
             app.navigate('schedule');
-            input.value = '';
+            setInterval(app.updateTimers, 1000);
         } else {
             document.getElementById('login-error').style.display = 'block';
         }
     },
 
+    // Fixed Logout Logic
     logout: () => {
         currentUser = null;
-        document.getElementById('main-app').classList.remove('active');
-        document.getElementById('login-screen').classList.add('active');
-        document.getElementById('dropdown').classList.remove('active');
         document.getElementById('auth-code').value = '';
+        document.getElementById('main-app').classList.remove('active');
+        document.getElementById('dropdown').classList.remove('active');
+        document.getElementById('login-screen').classList.add('active');
     },
-
-    toggleMenu: () => document.getElementById('dropdown').classList.toggle('active'),
 
     navigate: (view) => {
         currentActiveView = view;
         document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
-        const target = document.getElementById(`view-${view}`);
-        if(target) target.classList.remove('hidden');
+        document.getElementById(`view-${view}`).classList.remove('hidden');
         document.getElementById('dropdown').classList.remove('active');
         app.render(view);
-        app.clearNotify(view);
+    },
+
+    triggerUpdate: (tab) => {
+        if (!db.updates) db.updates = {};
+        db.updates[tab] = Date.now();
+        app.save();
+    },
+
+    addExam: () => app.openModal('exams'),
+    addHomework: () => app.openModal('homework'),
+    addAbsence: () => app.openModal('teachers'),
+
+    deleteItem: (view, index) => {
+        if (confirm("Are you sure you want to delete this item?")) {
+            db[view].splice(index, 1);
+            app.triggerUpdate(view);
+        }
+    },
+
+    editStudentName: (index) => {
+        const newName = prompt("Enter new name for this student:", db.users[index].name);
+        if (newName) {
+            db.users[index].name = newName;
+            app.save();
+        }
+    },
+
+    editStudentCode: (index) => {
+        const newCode = prompt("Enter new access code (password) for this student:", db.users[index].code);
+        if (newCode) {
+            db.users[index].code = newCode;
+            app.save();
+        }
+    },
+
+    promote: (index) => {
+        if (confirm(`Promote ${db.users[index].name} to Admin?`)) {
+            db.users[index].role = 'admin';
+            app.save();
+        }
+    },
+
+    deleteStudent: (index) => {
+        if (confirm(`Are you sure you want to remove ${db.users[index].name} from the system?`)) {
+            db.users.splice(index, 1);
+            app.save();
+        }
     },
 
     render: (view) => {
-        const isAdmin = currentUser && currentUser.role === 'admin';
-        
+        const isPro = currentUser.role === 'pro-admin';
+        const isAdmin = isPro || currentUser.role === 'admin';
+        document.querySelectorAll('.admin-only').forEach(el => el.style.display = isAdmin ? 'block' : 'none');
+
         if (view === 'schedule') {
             const body = document.getElementById('schedule-body');
             body.innerHTML = `<tr><th>Session</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th></tr>`;
-            db.schedule.forEach((row, rIdx) => {
-                let tr = `<tr><td style="font-weight:700; color:#adb5bd; background:rgba(0,0,0,0.2)">${row[0]}</td>`;
-                for(let cIdx=1; cIdx<=6; cIdx++) {
-                    const cellVal = row[cIdx] || "-";
-                    const editAttr = isAdmin ? `class="admin-editable-cell" onclick="app.editCell(${rIdx},${cIdx})"` : '';
-                    tr += `<td ${editAttr}>${cellVal}</td>`;
-                }
-                body.innerHTML += tr + `</tr>`;
-            });
+            if (db.schedule) {
+                db.schedule.forEach((row, rIdx) => {
+                    let tr = `<tr><td style="font-weight:700; color:#adb5bd;">${row[0]}</td>`;
+                    for(let cIdx=1; cIdx<=6; cIdx++) {
+                        const cellVal = row[cIdx] || "-";
+                        tr += `<td ${isAdmin ? `onclick="app.editCell(${rIdx},${cIdx})"` : ''}>${cellVal}</td>`;
+                    }
+                    body.innerHTML += tr + `</tr>`;
+                });
+            }
         } 
         else if (view === 'students' && isAdmin) {
             const body = document.getElementById('student-list-body');
             body.innerHTML = '';
             db.users.forEach((u, i) => {
                 const isSelf = u.code === currentUser.code;
-                const actions = isSelf ? '--' : `
-                    ${u.role !== 'admin' ? `<button class="btn-action btn-promote" onclick="app.promote(${i})">Promote</button>` : ''}
-                    <button class="btn-action btn-delete" onclick="app.delStudent(${i})">Del</button>`;
+                let canView = isPro || (isAdmin && u.role === 'student') || isSelf;
+                let codeDisplay = canView ? u.code : '••••••••';
                 
                 body.innerHTML += `<tr>
-                    <td style="text-align:left; font-weight:600">${u.name} ${u.role==='admin'?'<span class="badge-admin">ADMIN</span>':''}</td>
-                    <td style="font-family:monospace; color:#f39c12">${u.code}</td>
+                    <td onclick="${canView ? `app.editStudentName(${i})`:''}" class="${canView ? 'admin-editable-cell' : ''}">${u.name} ${u.role==='pro-admin'?'<span class="badge-pro">PRO</span>':u.role==='admin'?'<span class="badge-admin">ADMIN</span>':''}</td>
+                    <td onclick="${canView ? `app.editStudentCode(${i})`:''}" class="${canView ? 'admin-editable-cell' : ''}">${codeDisplay}</td>
                     <td>${u.role}</td>
-                    <td style="font-size:0.7rem">${u.lastLogin}</td>
-                    <td>${actions}</td>
+                    <td>${u.lastLogin || 'Never'}</td>
+                    <td>${(isPro && !isSelf) ? `<button class="btn-action btn-promote" onclick="app.promote(${i})">Promote</button> <button class="btn-action btn-delete" onclick="app.deleteStudent(${i})">Del</button>` : '--'}</td>
                 </tr>`;
             });
         }
-        else if (['exams', 'homework', 'teachers'].includes(view)) {
+        else if (view === 'exams' || view === 'homework') {
             const container = document.getElementById(`${view}-container`);
-            
-            // Fix: Fallback to empty array if data is missing
-            const items = db[view] || [];
-            
-            container.innerHTML = items.length ? '' : `<div class="empty-state" style="text-align:center; padding:50px; color:#666; font-style:italic">Everything is chill. Nothing here yet.</div>`;
-            
-            items.forEach((item, index) => {
-                const delIcon = isAdmin ? `<button class="delete-btn" onclick="app.delItem('${view}',${index})"><i class="fas fa-trash"></i></button>` : '';
-                container.innerHTML += `<div class="card glass ${item.status === 'Confirmed Exam' ? 'status-confirmed' : ''}">
-                    ${delIcon}<h4>${item.subject || item.name}</h4><p>${item.lessons || item.description || ''}</p>
-                    <div style="margin-top:10px;"><span class="btn-outline" style="border-color:rgba(255,255,255,0.1)">${item.status || item.deadline || item.duration}</span></div>
+            container.innerHTML = '';
+            (db[view] || []).forEach((item, i) => {
+                container.innerHTML += `
+                <div class="card glass state-${item.state || ''}" onclick="this.classList.toggle('expanded')">
+                    ${isAdmin ? `<button class="delete-btn" onclick="event.stopPropagation(); app.deleteItem('${view}',${i})"><i class="fas fa-trash"></i></button>` : ''}
+                    <h4>${item.subject}</h4>
+                    <p><i class="far fa-calendar-alt"></i> ${item.date}</p>
+                    <p>${item.desc}</p>
+                    <div class="timeline-container"><div class="timeline-bar" id="bar-${view}-${i}"></div></div>
+                    <span class="timer-text" id="timer-${view}-${i}"></span>
+                </div>`;
+            });
+        }
+        else if (view === 'teachers') {
+            const container = document.getElementById('teachers-container');
+            container.innerHTML = '';
+            (db.teachers || []).forEach((item, i) => {
+                container.innerHTML += `
+                <div class="card glass">
+                    ${isAdmin ? `<button class="delete-btn" onclick="app.deleteItem('teachers',${i})"><i class="fas fa-trash"></i></button>` : ''}
+                    <h4>${item.name}</h4>
+                    <p>Absent: <strong style="color:var(--accent-red)">${item.dates}</strong></p>
                 </div>`;
             });
         }
     },
 
-    editCell: (r, c) => {
-        const val = prompt("Enter Subject:", db.schedule[r][c]);
-        if (val !== null) { db.schedule[r][c] = val; db.updates.schedule = Date.now(); app.save(); }
-    },
-    delItem: (cat, i) => { if(confirm("Delete this entry?")) { db[cat].splice(i,1); app.save(); } },
-    promote: (i) => { if(confirm(`Make ${db.users[i].name} an Admin?`)) { db.users[i].role = 'admin'; app.save(); }},
-    delStudent: (i) => { if(confirm("Permanently remove this student?")) { db.users.splice(i,1); app.save(); }},
-    
-    addStudent: () => {
-        const name = prompt("Student Full Name:");
-        if(!name) return;
-        const code = Math.random().toString(36).substring(2,8).toUpperCase();
-        db.users.push({name, code, role:'student', lastLogin:'Never'});
-        app.save();
-        alert(`Created: ${name}\nCode: ${code}`);
+    openModal: (type) => {
+        modalType = type;
+        document.getElementById('action-modal').classList.add('active');
+        document.getElementById('group-subject').classList.toggle('hidden', type === 'teachers');
+        document.getElementById('group-teacher').classList.toggle('hidden', type !== 'teachers');
+        document.getElementById('group-date').classList.toggle('hidden', type === 'teachers');
+        document.getElementById('group-state').classList.toggle('hidden', type !== 'exams');
+        document.getElementById('group-dates-absence').classList.toggle('hidden', type !== 'teachers');
     },
 
-    addExam: () => {
-        const s = prompt("Subject:"); if(!s) return;
-        const l = prompt("Lessons:");
-        const st = prompt("Status: 1 for Possible, 2 for Confirmed") == '2' ? "Confirmed Exam" : "Possible Exam";
-        if (!db.exams) db.exams = []; // Fix: Check existence
-        db.exams.push({subject:s, lessons:l, status:st}); db.updates.exams = Date.now(); app.save();
-    },
-
-    addHomework: () => {
-        const s = prompt("Subject:"); if(!s) return;
-        const d = prompt("Homework Details:");
-        const dl = prompt("Deadline:");
-        if (!db.homework) db.homework = []; // Fix: Check existence
-        db.homework.push({subject:s, description:d, deadline:dl}); db.updates.homework = Date.now(); app.save();
-    },
-
-    addAbsence: () => {
-        const n = prompt("Teacher Name:"); if(!n) return;
-        const d = prompt("Absent for how long?");
-        if (!db.teachers) db.teachers = []; // Fix: Check existence
-        db.teachers.push({name:n, duration:d}); db.updates.teachers = Date.now(); app.save();
-    },
-
-    checkNotifications: () => {
-        const last = localStorage.getItem('last_viewed') || 0;
-        let show = false;
-        if (!db.updates) return; // Safety check
-        ['schedule','exams','homework','teachers'].forEach(t => {
-            if(db.updates[t] > last) { 
-                const dot = document.getElementById(`dot-${t}`);
-                if(dot) dot.style.display = 'inline-block';
-                show = true; 
+    submitModal: () => {
+        if (modalType === 'teachers') {
+            const name = document.getElementById('input-teacher').value;
+            // Get checked days
+            const checkedBoxes = Array.from(document.querySelectorAll('.day-cb:checked')).map(cb => cb.value);
+            const customDate = document.getElementById('input-absence-custom').value;
+            
+            let finalDates = checkedBoxes.join(', ');
+            if (customDate) {
+                finalDates += finalDates ? ` (and ${customDate})` : customDate;
             }
-        });
-        if(show) document.getElementById('global-notify').style.display = 'inline-block';
+            if (!finalDates) finalDates = "Unspecified Date";
+
+            if (!db.teachers) db.teachers = [];
+            db.teachers.push({ name, dates: finalDates });
+        } else {
+            const newItem = {
+                subject: document.getElementById('input-subject').value,
+                date: document.getElementById('input-date').value,
+                desc: document.getElementById('input-desc').value,
+                state: document.getElementById('input-state').value
+            };
+            if (!db[modalType]) db[modalType] = [];
+            db[modalType].push(newItem);
+        }
+        app.triggerUpdate(modalType);
+        app.closeModal();
     },
-    clearNotify: (view) => {
-        const dot = document.getElementById(`dot-${view}`);
-        if(dot) dot.style.display = 'none';
-        localStorage.setItem('last_viewed', Date.now());
-        const remaining = Array.from(document.querySelectorAll('.menu-item .notify-dot')).some(d => d.style.display === 'inline-block');
-        if(!remaining) document.getElementById('global-notify').style.display = 'none';
+
+    closeModal: () => {
+        document.getElementById('action-modal').classList.remove('active');
+        document.getElementById('input-teacher').value = '';
+        document.getElementById('input-absence-custom').value = '';
+        document.getElementById('input-subject').value = '';
+        document.getElementById('input-date').value = '';
+        document.getElementById('input-desc').value = '';
+        document.querySelectorAll('.day-cb').forEach(cb => cb.checked = false);
+    },
+
+    updateTimers: () => {
+        ['exams', 'homework'].forEach(view => {
+            (db[view] || []).forEach((item, i) => {
+                const bar = document.getElementById(`bar-${view}-${i}`);
+                const text = document.getElementById(`timer-${view}-${i}`);
+                if (!bar || !text) return;
+                
+                const diff = new Date(item.date).getTime() - new Date().getTime();
+                if (diff < 0) { text.innerText = "Overdue"; bar.style.width = "0%"; bar.style.backgroundColor = "#555"; return; }
+                
+                const hrs = Math.floor(diff / 3600000);
+                const mins = Math.floor((diff % 3600000) / 60000);
+                text.innerText = `${hrs}h ${mins}m remaining`;
+                
+                bar.style.width = Math.min(100, (hrs / 168) * 100) + "%";
+                bar.style.backgroundColor = hrs > 48 ? "#2ecc71" : hrs > 24 ? "#f1c40f" : "#e74c3c";
+            });
+        });
+    },
+
+    toggleMenu: () => document.getElementById('dropdown').classList.toggle('active'),
+    editCell: (r, c) => {
+        const val = prompt("Enter value:", db.schedule[r][c]);
+        if(val !== null) { db.schedule[r][c] = val; app.triggerUpdate('schedule'); }
     }
 };
-
-document.getElementById('auth-code').addEventListener('keypress', e => { if(e.key==='Enter') app.login(); });
